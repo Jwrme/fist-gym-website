@@ -1,0 +1,37 @@
+name: fist-gym
+services:
+- name: web
+  source_dir: /senjitsu
+  github:
+    repo: your-username/your-repo-name
+    branch: main
+  run_command: node backend/index.js
+  environment_slug: node-js
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  http_port: 3001
+  envs:
+  - key: NODE_ENV
+    value: production
+  - key: PORT
+    value: "3001"
+  - key: MONGODB_URI
+    value: ${db.CONNECTION_STRING}
+    type: SECRET
+  - key: JWT_SECRET
+    value: ${JWT_SECRET}
+    type: SECRET
+  - key: EMAIL_USER
+    value: ${EMAIL_USER}
+    type: SECRET
+  - key: EMAIL_PASS
+    value: ${EMAIL_PASS}
+    type: SECRET
+  - key: OPENAI_API_KEY
+    value: ${OPENAI_API_KEY}
+    type: SECRET
+
+databases:
+- name: db
+  engine: MONGODB
+  version: "6"
