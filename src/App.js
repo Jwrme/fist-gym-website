@@ -675,7 +675,7 @@ function App() {
             setUser(userData);
             setIsAdmin(!!userData.isAdmin);
             if (userData.userType === 'coach' || userData.role === 'coach') {
-              window.location.href = '/schedules';
+              navigate('/schedules', { replace: true });
             }
           }} />} />
           <Route path="/classes" element={<Classes />} />
