@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 // Import API configuration to override fetch globally
 import './utils/apiConfig';
+import './utils/imageUtils';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import Promos from './components/Promos';
