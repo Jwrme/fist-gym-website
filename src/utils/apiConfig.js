@@ -1,7 +1,5 @@
 // Global API Configuration
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://senjitsu-backend.onrender.com'
-  : 'http://localhost:3001';
+const API_BASE_URL = 'https://senjitsu-backend.onrender.com';
 
 // Helper function to build API URLs
 export const buildApiUrl = (endpoint) => {
@@ -16,11 +14,16 @@ export { API_BASE_URL };
 // Override fetch to automatically use the correct base URL
 const originalFetch = window.fetch;
 window.fetch = function(url, options) {
-  // If URL starts with /api, prepend the base URL
-  if (typeof url === 'string' && url.startsWith('/api')) {
-    url = `${API_BASE_URL}${url}`;
+  // Replace any localhost:3001 URLs with production backend
+  if (typeof url === 'string') {
+    if (url.includes('localhost:3001')) {
+      url = url.replace('http://localhost:3001', API_BASE_URL);
+    } else if (url.startsWith('/api')) {
+      url = `${API_BASE_URL}${url}`;
+    }
   }
   return originalFetch.call(this, url, options);
 };
 
 export default API_BASE_URL;
+
