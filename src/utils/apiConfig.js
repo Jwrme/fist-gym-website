@@ -25,5 +25,22 @@ window.fetch = function(url, options) {
   return originalFetch.call(this, url, options);
 };
 
-export default API_BASE_URL;
+// Helper function to fix image/upload paths
+export const getImageUrl = (imagePath) => {
+  if (!imagePath) return null;
+  
+  // If it's already a full URL, return as is
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    return imagePath;
+  }
+  
+  // If it starts with /uploads/, /images/, or other asset paths, prepend backend URL
+  if (imagePath.startsWith('/uploads/') || imagePath.startsWith('/images/') || imagePath.startsWith('/')) {
+    return `${API_BASE_URL}${imagePath}`;
+  }
+  
+  // Otherwise, assume it's a relative path and prepend backend URL
+  return `${API_BASE_URL}/${imagePath}`;
+};
 
+export default API_BASE_URL;
