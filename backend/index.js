@@ -88,7 +88,8 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
-
+// Serve React build files for production
+app.use(express.static(path.join(__dirname, '../build')));
 // MongoDB connection will be established later with proper options
 
 // Simple multer setup for basic file uploads (if needed)
@@ -8018,3 +8019,21 @@ app.post('/api/bookings/:id/complete', async (req, res) => {
 
 // REMOVED: Duplicate coach verification email endpoint with boxing glove emoji
 // This was causing duplicate emails to be sent
+// SPA Fallback Route - Serve React app for all non-API routes
+// This MUST be the last route to catch all unmatched routes
+app.get('*', (req, res) => {
+  // Don't serve index.html for API routes
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API endpoint not found' });
+  }
+  
+  // Serve React app's index.html for all other routes
+  res.sendFile(path.join(__dirname, '../build/index.html'), (err) => {
+    if (err) {
+      console.error('Error serving React app:', err);
+      res.status(500).send('Error loading application');
+    }
+  });
+});
+
+// Start server (HTTP + WebSocket)
