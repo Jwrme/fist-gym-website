@@ -3671,10 +3671,11 @@ server.listen(PORT, '0.0.0.0', () => {
   // Set up periodic cleanup every 5 minutes (for testing)
   setInterval(() => moveCompletedBookingsToHistory(wss), 5 * 60 * 1000);
   
-  // 🔥 NEW: Set up periodic cleanup for expired coach availability every 30 minutes
-  setInterval(() => cleanupExpiredCoachAvailability(), 30 * 60 * 1000);
+ 
+  // 🔥 NEW: Set up periodic cleanup for expired coach availability every 5 minutes
+  setInterval(() => cleanupExpiredCoachAvailability(), 5 * 60 * 1000);
   
-  console.log('🧹 Automatic coach availability cleanup will run every 30 minutes');
+  console.log('🧹 Automatic coach availability cleanup will run every 5 minutes');
   console.log('🔄 Automatic booking cleanup will run every 5 minutes');
   
   // Start membership expiration checker
