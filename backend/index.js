@@ -3493,39 +3493,28 @@ const errorHandler = (err, req, res, next) => {
 app.use(errorHandler);
 
 // Function to move completed bookings to history (OPTIMIZED)
-const moveCompletedBookingsToHistory = async (wss, options = {}) => {
+const moveCompletedBookingsToHistory = async (wss) => {
     try {
-        const { fullSweep = false } = options;
-        const sweepType = fullSweep ? 'full sweep (all users)' : 'active users only';
-        console.log(`[${new Date().toLocaleString()}] 🔍 Checking for completed bookings (${sweepType})...`);
+        console.log(`[${new Date().toLocaleString()}] 🔍 Checking for completed bookings (active users only)...`);
         
         // First, sync payment status from payments collection to users.bookings
         await syncPaymentStatusToUserBookings();
         
-        let users;
-        if (fullSweep) {
-            // Full sweep: get all users with bookings
-            users = await User.find({ 
-                bookings: { $exists: true, $not: { $size: 0 } }
-            }).select('username firstname lastname bookings bookingHistory lastActive');
-        } else {
-            // 🔥 OPTIMIZATION: Only get users who were active in the last 24 hours
-            const oneDayAgo = new Date();
-            oneDayAgo.setHours(oneDayAgo.getHours() - 24);
-            
-            users = await User.find({ 
-                bookings: { $exists: true, $not: { $size: 0 } },
-                lastActive: { $gte: oneDayAgo } // Only recently active users
-            }).select('username firstname lastname bookings bookingHistory lastActive');
-        }
+        // 🔥 OPTIMIZATION: Only get users who were active in the last 24 hours
+        const oneDayAgo = new Date();
+        oneDayAgo.setHours(oneDayAgo.getHours() - 24);
+        
+        const users = await User.find({ 
+            bookings: { $exists: true, $not: { $size: 0 } },
+            lastActive: { $gte: oneDayAgo } // Only recently active users
+        }).select('username firstname lastname bookings bookingHistory lastActive');
 
         if (users.length === 0) {
             console.log(`✨ No active users to process.`);
             return;
         }
 
-        const userTypeMsg = fullSweep ? `all users with bookings` : `recently active users (instead of all users)`;
-        console.log(`👥 Processing ${users.length} ${userTypeMsg}`);
+        console.log(`👥 Processing ${users.length} recently active users (instead of all users)`);
 
         let totalMoved = 0;
         const affectedUsers = [];
@@ -3600,8 +3589,7 @@ const moveCompletedBookingsToHistory = async (wss, options = {}) => {
         }
 
         if (totalMoved > 0) {
-            const sweepTypeLog = fullSweep ? 'all users' : 'active users';
-            console.log(`📚 Total bookings moved to history: ${totalMoved} (from ${users.length} ${sweepTypeLog})`);
+            console.log(`📚 Total bookings moved to history: ${totalMoved} (from ${users.length} active users)`);
             
             // Broadcast WebSocket message to all connected clients
             if (wss && wss.clients) {
@@ -3610,8 +3598,7 @@ const moveCompletedBookingsToHistory = async (wss, options = {}) => {
                     data: {
                         totalMoved,
                         affectedUsers,
-                        timestamp: new Date().toISOString(),
-                        sweepType: fullSweep ? 'full' : 'active'
+                        timestamp: new Date().toISOString()
                     }
                 });
 
@@ -3623,8 +3610,7 @@ const moveCompletedBookingsToHistory = async (wss, options = {}) => {
                 });
             }
         } else {
-            const sweepTypeLog = fullSweep ? 'all users' : 'recently active users';
-            console.log(`✨ No completed bookings found to move from ${users.length} ${sweepTypeLog}.`);
+            console.log(`✨ No completed bookings found to move from ${users.length} recently active users.`);
         }
     } catch (error) {
         console.error('❌ Error moving completed bookings to history:', error);
@@ -3728,12 +3714,8 @@ server.listen(PORT, '0.0.0.0', () => {
   // 🔥 NEW: Set up periodic cleanup for expired coach availability every 5 minutes
   setInterval(() => cleanupExpiredCoachAvailability(), 5 * 60 * 1000);
   
-  // 🔥 NEW: Set up full sweep for completed bookings every 12 hours
-  setInterval(() => moveCompletedBookingsToHistory(wss, { fullSweep: true }), 12 * 60 * 60 * 1000);
-  
   console.log('🧹 Automatic coach availability cleanup will run every 5 minutes');
-  console.log('🔄 Automatic booking cleanup will run every 5 minutes (active users)');
-  console.log('🌍 Full booking sweep will run every 12 hours (all users)');
+  console.log('🔄 Automatic booking cleanup will run every 5 minutes');
   
   // Start membership expiration checker
   startMembershipExpirationChecker();
