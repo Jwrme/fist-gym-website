@@ -20,16 +20,6 @@ const { buildVerificationEmail } = require('./emailTemplates');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Validate required environment variables for Render deployment
-const requiredEnvVars = ['MONGODB_URI', 'EMAIL_USER', 'EMAIL_PASS', 'OPENAI_API_KEY'];
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-
-if (missingEnvVars.length > 0) {
-  console.error('❌ Missing required environment variables:', missingEnvVars);
-  console.error('Please set these in your Render dashboard environment variables section');
-  process.exit(1);
-}
-
 // Rate limiting - Environment-based configuration
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const RATE_LIMIT_MAX = isDevelopment ? 50000 : 1000; // 50k for dev, 1k for production
@@ -55,22 +45,30 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Enhanced CORS configuration for Render deployment
+// Enhanced CORS configuration
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
+    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
     const allowedOrigins = [
-      'http://localhost:3000', 
+      'http://localhost:3000',
       'http://127.0.0.1:3000', 
       'http://localhost:3001',
-      // Add your Render frontend URL here when you deploy frontend
-      // 'https://your-frontend-app.onrender.com'
+      // Add your Render frontend URL here when you deploy the frontend
+      /\.onrender\.com$/
     ];
     
-    // Allow any .onrender.com subdomain for Render deployments
-    if (origin.includes('.onrender.com') || allowedOrigins.includes(origin)) {
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (typeof allowed === 'string') {
+        return origin === allowed;
+      } else if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -86,10 +84,14 @@ const corsOptions = {
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '500mb' }));
+
+// Serve static files from React build
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../build')));
+}
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
-// Serve React build files for production
-app.use(express.static(path.join(__dirname, '../build')));
+
 // MongoDB connection will be established later with proper options
 
 // Simple multer setup for basic file uploads (if needed)
@@ -116,35 +118,61 @@ const mongooseOptions = {
   retryReads: true // Enable retryable reads
 };
 
-// Database optimization - add indexes for better query performance
-const addDatabaseIndexes = async () => {
+// Function to create database indexes for performance optimization
+const createDatabaseIndexes = async () => {
     try {
+        console.log('🔧 Creating database indexes for performance optimization...');
+        
+        // Wait for collections to be ready
+        if (!User.collection || !Coach.collection) {
+            console.log('⚠️ Collections not ready, skipping index creation');
+            return;
+        }
+
+        // Helper function to safely create index
+        const safeCreateIndex = async (collection, indexSpec, options) => {
+            try {
+                await collection.createIndex(indexSpec, options);
+                console.log(`✅ Created index: ${options.name}`);
+            } catch (error) {
+                if (error.code === 85 || error.message.includes('already exists')) {
+                    console.log(`ℹ️ Index already exists: ${options.name}`);
+                } else {
+                    console.error(`❌ Error creating index ${options.name}:`, error.message);
+                }
+            }
+        };
+        
         // 🚀 CRITICAL: Compound index for booking status checks (FASTEST LOOKUP)
-        await User.collection.createIndex({ 
+        await safeCreateIndex(User.collection, { 
             'bookings.coachId': 1, 
             'bookings.date': 1, 
             'bookings.time': 1,
             'bookings.paymentStatus': 1 
-        });
+        }, { background: true, name: 'bookings_compound_idx' });
         
         // 🚀 CRITICAL: Individual field indexes for fast filtering
-        await User.collection.createIndex({ 'bookings.coachId': 1 });
-        await User.collection.createIndex({ 'bookings.paymentStatus': 1 });
+        await safeCreateIndex(User.collection, { 'bookings.coachId': 1 }, { background: true, name: 'bookings_coachId_idx' });
+        await safeCreateIndex(User.collection, { 'bookings.paymentStatus': 1 }, { background: true, name: 'bookings_paymentStatus_idx' });
         
         // 🔥 NEW: Index for lastActive field for performance optimization
-        await User.collection.createIndex({ lastActive: -1 });
+        await safeCreateIndex(User.collection, { lastActive: -1 }, { background: true, name: 'lastActive_idx' });
         
         // Index for coach lookups and specialty filtering
-        await Coach.collection.createIndex({ '_id': 1, 'specialties': 1 });
-        await Coach.collection.createIndex({ 'specialties': 1 });
+        await safeCreateIndex(Coach.collection, { '_id': 1, 'specialties': 1 }, { background: true, name: 'coach_id_specialties_idx' });
+        await safeCreateIndex(Coach.collection, { 'specialties': 1 }, { background: true, name: 'coach_specialties_idx' });
         
-        // Username lookups (login/profile)
-        await User.collection.createIndex({ 'username': 1 });
-        await Coach.collection.createIndex({ 'username': 1 });
+        // Username lookups (login/profile) - CRITICAL for user fetching
+        await safeCreateIndex(User.collection, { 'username': 1 }, { background: true, name: 'user_username_idx' });
+        await safeCreateIndex(Coach.collection, { 'username': 1 }, { background: true, name: 'coach_username_idx' });
         
-        console.log('✅ Database indexes created successfully for performance optimization');
+        // Email index for user lookups
+        await safeCreateIndex(User.collection, { 'email': 1 }, { background: true, name: 'user_email_idx' });
+        
+        console.log('✅ Database indexes setup completed successfully');
     } catch (error) {
-        console.error('Error creating indexes:', error);
+        console.error('❌ Error in index creation process:', error);
+        // Don't fail the app if indexes can't be created
     }
 };
 
@@ -157,13 +185,18 @@ const finalMongoUri = mongoUri.includes('mongodb+srv://') && !mongoUri.includes(
     mongoUri.replace('mongodb.net/?', 'mongodb.net/test?') : mongoUri;
 
 mongoose.connect(finalMongoUri, mongooseOptions)
-  .then(() => {
-    console.log('Successfully connected to MongoDB.');
-    // Add database indexes after models are defined
-    setTimeout(addDatabaseIndexes, 1000);
+  .then(async () => {
+    console.log('✅ Successfully connected to MongoDB.');
+    console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
+    
+    // Wait for models to be fully initialized before creating indexes
+    setTimeout(async () => {
+      await createDatabaseIndexes();
+    }, 3000);
   })
   .catch((err) => {
-    console.error('MongoDB connection error:', err);
+    console.error('❌ MongoDB connection error:', err);
+    console.error('Connection URI (sanitized):', finalMongoUri.replace(/\/\/.*@/, '//***:***@'));
     process.exit(1);
   });
 
@@ -3460,28 +3493,39 @@ const errorHandler = (err, req, res, next) => {
 app.use(errorHandler);
 
 // Function to move completed bookings to history (OPTIMIZED)
-const moveCompletedBookingsToHistory = async (wss) => {
+const moveCompletedBookingsToHistory = async (wss, options = {}) => {
     try {
-        console.log(`[${new Date().toLocaleString()}] 🔍 Checking for completed bookings (active users only)...`);
+        const { fullSweep = false } = options;
+        const sweepType = fullSweep ? 'full sweep (all users)' : 'active users only';
+        console.log(`[${new Date().toLocaleString()}] 🔍 Checking for completed bookings (${sweepType})...`);
         
         // First, sync payment status from payments collection to users.bookings
         await syncPaymentStatusToUserBookings();
         
-        // 🔥 OPTIMIZATION: Only get users who were active in the last 24 hours
-        const oneDayAgo = new Date();
-        oneDayAgo.setHours(oneDayAgo.getHours() - 24);
-        
-        const users = await User.find({ 
-            bookings: { $exists: true, $not: { $size: 0 } },
-            lastActive: { $gte: oneDayAgo } // Only recently active users
-        }).select('username firstname lastname bookings bookingHistory lastActive');
+        let users;
+        if (fullSweep) {
+            // Full sweep: get all users with bookings
+            users = await User.find({ 
+                bookings: { $exists: true, $not: { $size: 0 } }
+            }).select('username firstname lastname bookings bookingHistory lastActive');
+        } else {
+            // 🔥 OPTIMIZATION: Only get users who were active in the last 24 hours
+            const oneDayAgo = new Date();
+            oneDayAgo.setHours(oneDayAgo.getHours() - 24);
+            
+            users = await User.find({ 
+                bookings: { $exists: true, $not: { $size: 0 } },
+                lastActive: { $gte: oneDayAgo } // Only recently active users
+            }).select('username firstname lastname bookings bookingHistory lastActive');
+        }
 
         if (users.length === 0) {
             console.log(`✨ No active users to process.`);
             return;
         }
 
-        console.log(`👥 Processing ${users.length} recently active users (instead of all users)`);
+        const userTypeMsg = fullSweep ? `all users with bookings` : `recently active users (instead of all users)`;
+        console.log(`👥 Processing ${users.length} ${userTypeMsg}`);
 
         let totalMoved = 0;
         const affectedUsers = [];
@@ -3556,7 +3600,8 @@ const moveCompletedBookingsToHistory = async (wss) => {
         }
 
         if (totalMoved > 0) {
-            console.log(`📚 Total bookings moved to history: ${totalMoved} (from ${users.length} active users)`);
+            const sweepTypeLog = fullSweep ? 'all users' : 'active users';
+            console.log(`📚 Total bookings moved to history: ${totalMoved} (from ${users.length} ${sweepTypeLog})`);
             
             // Broadcast WebSocket message to all connected clients
             if (wss && wss.clients) {
@@ -3565,7 +3610,8 @@ const moveCompletedBookingsToHistory = async (wss) => {
                     data: {
                         totalMoved,
                         affectedUsers,
-                        timestamp: new Date().toISOString()
+                        timestamp: new Date().toISOString(),
+                        sweepType: fullSweep ? 'full' : 'active'
                     }
                 });
 
@@ -3577,7 +3623,8 @@ const moveCompletedBookingsToHistory = async (wss) => {
                 });
             }
         } else {
-            console.log(`✨ No completed bookings found to move from ${users.length} recently active users.`);
+            const sweepTypeLog = fullSweep ? 'all users' : 'recently active users';
+            console.log(`✨ No completed bookings found to move from ${users.length} ${sweepTypeLog}.`);
         }
     } catch (error) {
         console.error('❌ Error moving completed bookings to history:', error);
@@ -3657,6 +3704,13 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Catch-all handler: send back React's index.html file for client-side routing
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../build/index.html'));
+  });
+}
+
 // Start server (HTTP + WebSocket)
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
@@ -3671,12 +3725,15 @@ server.listen(PORT, '0.0.0.0', () => {
   // Set up periodic cleanup every 5 minutes (for testing)
   setInterval(() => moveCompletedBookingsToHistory(wss), 5 * 60 * 1000);
   
- 
   // 🔥 NEW: Set up periodic cleanup for expired coach availability every 5 minutes
   setInterval(() => cleanupExpiredCoachAvailability(), 5 * 60 * 1000);
   
+  // 🔥 NEW: Set up full sweep for completed bookings every 12 hours
+  setInterval(() => moveCompletedBookingsToHistory(wss, { fullSweep: true }), 12 * 60 * 60 * 1000);
+  
   console.log('🧹 Automatic coach availability cleanup will run every 5 minutes');
-  console.log('🔄 Automatic booking cleanup will run every 5 minutes');
+  console.log('🔄 Automatic booking cleanup will run every 5 minutes (active users)');
+  console.log('🌍 Full booking sweep will run every 12 hours (all users)');
   
   // Start membership expiration checker
   startMembershipExpirationChecker();
@@ -3684,10 +3741,36 @@ server.listen(PORT, '0.0.0.0', () => {
 
 app.get('/api/users', async (req, res) => {
   try {
-    const users = await User.find();
-    res.json(users);
+    console.log('🔍 Fetching all users...');
+    console.log('Database connection state:', mongoose.connection.readyState);
+    console.log('Database name:', mongoose.connection.db?.databaseName);
+    
+    const users = await User.find({}).lean();
+    console.log(`✅ Found ${users.length} users`);
+    
+    // Remove sensitive data before sending
+    const sanitizedUsers = users.map(user => ({
+      _id: user._id,
+      username: user.username,
+      firstname: user.firstname,
+      lastname: user.lastname,
+      email: user.email,
+      verified: user.verified,
+      isAdmin: user.isAdmin,
+      bookings: user.bookings || [],
+      bookingHistory: user.bookingHistory || [],
+      lastActive: user.lastActive,
+      notifications: user.notifications || []
+    }));
+    
+    res.json(sanitizedUsers);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch users.' });
+    console.error('❌ Error fetching users:', err);
+    res.status(500).json({ 
+      error: 'Failed to fetch users.',
+      details: err.message,
+      dbState: mongoose.connection.readyState
+    });
   }
 });
 
@@ -8020,21 +8103,3 @@ app.post('/api/bookings/:id/complete', async (req, res) => {
 
 // REMOVED: Duplicate coach verification email endpoint with boxing glove emoji
 // This was causing duplicate emails to be sent
-// SPA Fallback Route - Serve React app for all non-API routes
-// This MUST be the last route to catch all unmatched routes
-app.get('*', (req, res) => {
-  // Don't serve index.html for API routes
-  if (req.path.startsWith('/api/')) {
-    return res.status(404).json({ error: 'API endpoint not found' });
-  }
-  
-  // Serve React app's index.html for all other routes
-  res.sendFile(path.join(__dirname, '../build/index.html'), (err) => {
-    if (err) {
-      console.error('Error serving React app:', err);
-      res.status(500).send('Error loading application');
-    }
-  });
-});
-
-// Start server (HTTP + WebSocket)
