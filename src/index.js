@@ -5,6 +5,7 @@ import App from './App';
 import reportWebVitals from './reportWebVitals';
 // Activate global API base URL and fetch override
 import './utils/apiConfig';
+import { initImageUrlFixer } from './utils/imageUtils';
 
 // Coach Account Verification System
 class CoachVerificationSystem {
@@ -212,6 +213,13 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// Initialize global image URL fixer after initial render
+try {
+  initImageUrlFixer();
+} catch (e) {
+  console.warn('Image URL fixer init warning:', e);
+}
 
 // If you want to start measuring performance in your app, pass a function
 // to log results (for example: reportWebVitals(console.log))
