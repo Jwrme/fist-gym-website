@@ -47,33 +47,7 @@ app.use(limiter);
 
 // Enhanced CORS configuration
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000', 
-      'http://localhost:3001',
-      // Add your Render frontend URL here when you deploy the frontend
-      /\.onrender\.com$/
-    ];
-    
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (typeof allowed === 'string') {
-        return origin === allowed;
-      } else if (allowed instanceof RegExp) {
-        return allowed.test(origin);
-      }
-      return false;
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001'],
   credentials: true,
   optionsSuccessStatus: 200, // For legacy browser support
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -84,11 +58,6 @@ const corsOptions = {
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '500mb' }));
-
-// Serve static files from React build
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../build')));
-}
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
@@ -118,61 +87,35 @@ const mongooseOptions = {
   retryReads: true // Enable retryable reads
 };
 
-// Function to create database indexes for performance optimization
-const createDatabaseIndexes = async () => {
+// Database optimization - add indexes for better query performance
+const addDatabaseIndexes = async () => {
     try {
-        console.log('🔧 Creating database indexes for performance optimization...');
-        
-        // Wait for collections to be ready
-        if (!User.collection || !Coach.collection) {
-            console.log('⚠️ Collections not ready, skipping index creation');
-            return;
-        }
-
-        // Helper function to safely create index
-        const safeCreateIndex = async (collection, indexSpec, options) => {
-            try {
-                await collection.createIndex(indexSpec, options);
-                console.log(`✅ Created index: ${options.name}`);
-            } catch (error) {
-                if (error.code === 85 || error.message.includes('already exists')) {
-                    console.log(`ℹ️ Index already exists: ${options.name}`);
-                } else {
-                    console.error(`❌ Error creating index ${options.name}:`, error.message);
-                }
-            }
-        };
-        
         // 🚀 CRITICAL: Compound index for booking status checks (FASTEST LOOKUP)
-        await safeCreateIndex(User.collection, { 
+        await User.collection.createIndex({ 
             'bookings.coachId': 1, 
             'bookings.date': 1, 
             'bookings.time': 1,
             'bookings.paymentStatus': 1 
-        }, { background: true, name: 'bookings_compound_idx' });
+        });
         
         // 🚀 CRITICAL: Individual field indexes for fast filtering
-        await safeCreateIndex(User.collection, { 'bookings.coachId': 1 }, { background: true, name: 'bookings_coachId_idx' });
-        await safeCreateIndex(User.collection, { 'bookings.paymentStatus': 1 }, { background: true, name: 'bookings_paymentStatus_idx' });
+        await User.collection.createIndex({ 'bookings.coachId': 1 });
+        await User.collection.createIndex({ 'bookings.paymentStatus': 1 });
         
         // 🔥 NEW: Index for lastActive field for performance optimization
-        await safeCreateIndex(User.collection, { lastActive: -1 }, { background: true, name: 'lastActive_idx' });
+        await User.collection.createIndex({ lastActive: -1 });
         
         // Index for coach lookups and specialty filtering
-        await safeCreateIndex(Coach.collection, { '_id': 1, 'specialties': 1 }, { background: true, name: 'coach_id_specialties_idx' });
-        await safeCreateIndex(Coach.collection, { 'specialties': 1 }, { background: true, name: 'coach_specialties_idx' });
+        await Coach.collection.createIndex({ '_id': 1, 'specialties': 1 });
+        await Coach.collection.createIndex({ 'specialties': 1 });
         
-        // Username lookups (login/profile) - CRITICAL for user fetching
-        await safeCreateIndex(User.collection, { 'username': 1 }, { background: true, name: 'user_username_idx' });
-        await safeCreateIndex(Coach.collection, { 'username': 1 }, { background: true, name: 'coach_username_idx' });
+        // Username lookups (login/profile)
+        await User.collection.createIndex({ 'username': 1 });
+        await Coach.collection.createIndex({ 'username': 1 });
         
-        // Email index for user lookups
-        await safeCreateIndex(User.collection, { 'email': 1 }, { background: true, name: 'user_email_idx' });
-        
-        console.log('✅ Database indexes setup completed successfully');
+        console.log('✅ Database indexes created successfully for performance optimization');
     } catch (error) {
-        console.error('❌ Error in index creation process:', error);
-        // Don't fail the app if indexes can't be created
+        console.error('Error creating indexes:', error);
     }
 };
 
@@ -185,18 +128,13 @@ const finalMongoUri = mongoUri.includes('mongodb+srv://') && !mongoUri.includes(
     mongoUri.replace('mongodb.net/?', 'mongodb.net/test?') : mongoUri;
 
 mongoose.connect(finalMongoUri, mongooseOptions)
-  .then(async () => {
-    console.log('✅ Successfully connected to MongoDB.');
-    console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
-    
-    // Wait for models to be fully initialized before creating indexes
-    setTimeout(async () => {
-      await createDatabaseIndexes();
-    }, 3000);
+  .then(() => {
+    console.log('Successfully connected to MongoDB.');
+    // Add database indexes after models are defined
+    setTimeout(addDatabaseIndexes, 1000);
   })
   .catch((err) => {
-    console.error('❌ MongoDB connection error:', err);
-    console.error('Connection URI (sanitized):', finalMongoUri.replace(/\/\/.*@/, '//***:***@'));
+    console.error('MongoDB connection error:', err);
     process.exit(1);
   });
 
@@ -3690,16 +3628,9 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Catch-all handler: send back React's index.html file for client-side routing
-if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../build/index.html'));
-  });
-}
-
 // Start server (HTTP + WebSocket)
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+server.listen(3001, '0.0.0.0', () => {
+  console.log('Server running on port 3001');
   console.log('For Android emulator, use: http://10.0.2.2:3001');
   
   // Run initial cleanup for completed bookings
@@ -3723,36 +3654,10 @@ server.listen(PORT, '0.0.0.0', () => {
 
 app.get('/api/users', async (req, res) => {
   try {
-    console.log('🔍 Fetching all users...');
-    console.log('Database connection state:', mongoose.connection.readyState);
-    console.log('Database name:', mongoose.connection.db?.databaseName);
-    
-    const users = await User.find({}).lean();
-    console.log(`✅ Found ${users.length} users`);
-    
-    // Remove sensitive data before sending
-    const sanitizedUsers = users.map(user => ({
-      _id: user._id,
-      username: user.username,
-      firstname: user.firstname,
-      lastname: user.lastname,
-      email: user.email,
-      verified: user.verified,
-      isAdmin: user.isAdmin,
-      bookings: user.bookings || [],
-      bookingHistory: user.bookingHistory || [],
-      lastActive: user.lastActive,
-      notifications: user.notifications || []
-    }));
-    
-    res.json(sanitizedUsers);
+    const users = await User.find();
+    res.json(users);
   } catch (err) {
-    console.error('❌ Error fetching users:', err);
-    res.status(500).json({ 
-      error: 'Failed to fetch users.',
-      details: err.message,
-      dbState: mongoose.connection.readyState
-    });
+    res.status(500).json({ error: 'Failed to fetch users.' });
   }
 });
 
