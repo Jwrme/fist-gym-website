@@ -1,6 +1,6 @@
 // Global API Configuration
 const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://senjitsu-backend.onrender.com'
+  ? 'https://fist-gym-website.onrender.com'
   : 'http://localhost:3001';
 
 // Helper function to build API URLs
@@ -22,5 +22,6 @@ window.fetch = function(url, options) {
   }
   return originalFetch.call(this, url, options);
 };
+
 
 export default API_BASE_URL;
