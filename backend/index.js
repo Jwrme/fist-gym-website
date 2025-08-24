@@ -1469,12 +1469,11 @@ app.post('/api/payroll', async (req, res) => {
 
     
     // Fetch coach earnings data
- // Fetch unpaid coach earnings data (no date restrictions)
     const coachIdString = coachId.toString();
     const bookings = await Booking.find({
       coachId: coachIdString,
       status: 'completed',
-      payrollStatus: { $ne: 'paid' } // Only get bookings that haven't been paid yet
+      date: { $gte: startOfMonth, $lte: endOfMonth }
     });
     
     const totalClasses = bookings.length;
@@ -1482,10 +1481,10 @@ app.post('/api/payroll', async (req, res) => {
     const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
     const coachShare = totalRevenue * 0.5;
     
-    // Get unpaid attendance data (no date restrictions)
+    // Get attendance data
     const attendanceRecords = await CoachesAttendance.find({
       coachId,
-      payrollStatus: { $ne: 'paid' } // Only get attendance that hasn't been paid yet
+      date: { $gte: startOfMonth, $lte: endOfMonth }
     });
     
     const totalDaysPresent = attendanceRecords.filter(record => record.status === 'present').length;
@@ -1511,21 +1510,6 @@ app.post('/api/payroll', async (req, res) => {
     });
 
     await payroll.save();
-// Mark completed bookings as "paid" instead of deleting them
-    // This way new bookings can still accumulate for next payroll
-    await Booking.updateMany({
-      coachId: coachIdString,
-      status: 'completed'
-    }, {
-      $set: { payrollStatus: 'paid', paidDate: new Date(paymentDate) }
-    });
-
-    // Mark attendance records as "paid" instead of deleting them
-    await CoachesAttendance.updateMany({
-      coachId
-    }, {
-      $set: { payrollStatus: 'paid', paidDate: new Date(paymentDate) }
-    });
     // Update coach's lastPaidDate
     await Coach.findByIdAndUpdate(coachId, {
       lastPaidDate: new Date(paymentDate)
