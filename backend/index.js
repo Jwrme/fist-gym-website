@@ -1469,26 +1469,23 @@ app.post('/api/payroll', async (req, res) => {
 
     
     // Fetch coach earnings data
-  const coachIdString = coachId.toString();
-const paymentDateObj = new Date(paymentDate);
-const startOfMonth = new Date(paymentDateObj.getFullYear(), paymentDateObj.getMonth(), 1);
-const endOfMonth = new Date(paymentDateObj.getFullYear(), paymentDateObj.getMonth() + 1, 0);
+// Fetch coach earnings data - ALL completed bookings for anytime payroll processing
+const coachIdString = coachId.toString();
+
 const bookings = await Booking.find({
   coachId: coachIdString,
-  status: 'completed',
-  date: { $gte: startOfMonth, $lte: endOfMonth }
+  status: 'completed'
 });
-    
-    const totalClasses = bookings.length;
-    const totalClients = bookings.reduce((sum, booking) => sum + (booking.clients || 1), 0);
-    const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
-    const coachShare = totalRevenue * 0.5;
-    
-    // Get attendance data
-    const attendanceRecords = await CoachesAttendance.find({
-      coachId,
-      date: { $gte: startOfMonth, $lte: endOfMonth }
-    });
+
+const totalClasses = bookings.length;
+const totalClients = bookings.reduce((sum, booking) => sum + (booking.clients || 1), 0);
+const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
+const coachShare = totalRevenue * 0.5;
+
+// Get attendance data (all attendance records for comprehensive calculation)
+const attendanceRecords = await CoachesAttendance.find({
+  coachId
+});
     
     const totalDaysPresent = attendanceRecords.filter(record => record.status === 'present').length;
     const totalDaysAbsent = attendanceRecords.filter(record => record.status === 'absent').length;
