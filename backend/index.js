@@ -1469,12 +1469,15 @@ app.post('/api/payroll', async (req, res) => {
 
     
     // Fetch coach earnings data
-    const coachIdString = coachId.toString();
-    const bookings = await Booking.find({
-      coachId: coachIdString,
-      status: 'completed',
-      date: { $gte: startOfMonth, $lte: endOfMonth }
-    });
+  const coachIdString = coachId.toString();
+const paymentDateObj = new Date(paymentDate);
+const startOfMonth = new Date(paymentDateObj.getFullYear(), paymentDateObj.getMonth(), 1);
+const endOfMonth = new Date(paymentDateObj.getFullYear(), paymentDateObj.getMonth() + 1, 0);
+const bookings = await Booking.find({
+  coachId: coachIdString,
+  status: 'completed',
+  date: { $gte: startOfMonth, $lte: endOfMonth }
+});
     
     const totalClasses = bookings.length;
     const totalClients = bookings.reduce((sum, booking) => sum + (booking.clients || 1), 0);
