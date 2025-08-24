@@ -1454,7 +1454,7 @@ app.delete('/api/coaches/:id', async (req, res) => {
 // Payroll endpoints
 app.post('/api/payroll', async (req, res) => {
   try {
-    const { coachId, amount, paymentDate, status, payrollMonth, payrollYear } = req.body;
+   const { coachId, amount, paymentDate, status } = req.body;
     
     // Validate required fields
     if (!coachId || !amount || !paymentDate) {
@@ -1468,12 +1468,12 @@ app.post('/api/payroll', async (req, res) => {
     }
 
     
-     // Get ALL completed bookings for this coach (no date restrictions)
-    // This allows for flexible payroll processing at any time
+     // Fetch coach earnings data
     const coachIdString = coachId.toString();
     const bookings = await Booking.find({
       coachId: coachIdString,
-      status: 'completed'
+      status: 'completed',
+      date: { $gte: startOfMonth, $lte: endOfMonth }
     });
     
     const totalClasses = bookings.length;
@@ -1481,16 +1481,17 @@ app.post('/api/payroll', async (req, res) => {
     const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
     const coachShare = totalRevenue * 0.5;
     
-    // Get ALL attendance data for this coach (no date restrictions)
+    // Get attendance data
     const attendanceRecords = await CoachesAttendance.find({
-      coachId
+      coachId,
+      date: { $gte: startOfMonth, $lte: endOfMonth }
     });
     
     const totalDaysPresent = attendanceRecords.filter(record => record.status === 'present').length;
     const totalDaysAbsent = attendanceRecords.filter(record => record.status === 'absent').length;
     const totalDaysMarked = attendanceRecords.length;
 
-    // Create comprehensive payroll record with period information
+ // Create comprehensive payroll record
     const payroll = new Payroll({
       coachId,
       amount,
@@ -1505,10 +1506,6 @@ app.post('/api/payroll', async (req, res) => {
         totalDaysAbsent,
         totalDaysMarked
       },
-      payrollPeriod: {
-        paymentDate: new Date(paymentDate),
-        processedAt: new Date()
-      },
       processedBy: 'admin'
     });
 
@@ -1519,23 +1516,6 @@ app.post('/api/payroll', async (req, res) => {
     });
 
     console.log('✅ Comprehensive payroll record saved:', payroll._id);
-    console.log('💰 Payment processed:', {
-      coach: `${coach.firstname} ${coach.lastname}`,
-      amount: amount,
-      totalClasses: totalClasses,
-      totalRevenue: totalRevenue,
-      coachShare: coachShare
-    });
-    
-    // After successful payment, clear the coach's completed bookings
-    // This allows fresh data to accumulate for future payments
-    await Booking.deleteMany({
-      coachId: coachIdString,
-      status: 'completed'
-    });
-    
-    console.log('🗑️ Cleared completed bookings for coach after payment processing');
-    // Send notification to coach
     try {
       const paidThrough = new Date(paymentDate);
       const coachNotification = {
@@ -1560,22 +1540,12 @@ app.post('/api/payroll', async (req, res) => {
     // Return success response with detailed payroll data
     return res.status(201).json({
       message: 'Payment processed successfully',
-     payroll: {
-        ...payroll.toObject(),
-        coachName: `${coach.firstname} ${coach.lastname}`,
-        payrollPeriodDisplay: `Payment processed on ${new Date(paymentDate).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}`
-      },
-      notificationSent: true,
-      bookingsCleared: true
+     payroll,
+      notificationSent: true
     });
   } catch (error) {
     console.error('❌ Error processing payment:', error);
-    console.error('Error details:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to process payment', 
-      details: error.message,
-      timestamp: new Date().toISOString()
-    });
+    res.status(500).json({ error: 'Failed to process payment' });
   }
 });
 
@@ -1798,7 +1768,46 @@ app.get('/api/payroll/data/:coachId', async (req, res) => {
         totalClients++;
       }
     });
-
+     // 🔥 NEW: Process verified payments from Payment collection
+    verifiedPayments.forEach(payment => {
+      // For package bookings, only count once
+      if (payment.isPackage) {
+        const key = `${payment.packageType} Package|${new Date(payment.verificationDate).toISOString().split('T')[0]}`;
+        if (!classMap[key]) {
+          classMap[key] = {
+            date: new Date(payment.verificationDate),
+            className: `${payment.packageType} Package (${payment.packageSessions} sessions)`,
+            clientCount: 0,
+            revenue: 0,
+            coachShare: 0
+          };
+          totalClasses++;
+        }
+        classMap[key].clientCount += 1;
+        classMap[key].revenue += payment.amount || 0;
+        totalRevenue += payment.amount || 0;
+        totalClients += 1;
+      } else {
+        // Regular single class booking
+        const paymentDate = new Date(payment.date);
+        const resolvedClass = payment.className || payment.class || 'Unknown Class';
+        const key = `${resolvedClass}|${paymentDate.toISOString().split('T')[0]}`;
+        if (!classMap[key]) {
+          classMap[key] = {
+            date: paymentDate,
+            className: resolvedClass,
+            clientCount: 0,
+            revenue: 0,
+            coachShare: 0
+          };
+          totalClasses++;
+        }
+        classMap[key].clientCount++;
+        classMap[key].revenue += payment.amount || 0;
+        totalRevenue += payment.amount || 0;
+        totalClients++;
+      }
+    });
     // Compute coach share per class (50% split)
     Object.values(classMap).forEach(c => {
       c.coachShare = c.revenue * 0.5;
