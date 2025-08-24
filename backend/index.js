@@ -1469,23 +1469,22 @@ app.post('/api/payroll', async (req, res) => {
 
     
     // Fetch coach earnings data
-// Fetch coach earnings data - ALL completed bookings for anytime payroll processing
-const coachIdString = coachId.toString();
-
-const bookings = await Booking.find({
-  coachId: coachIdString,
-  status: 'completed'
-});
-
-const totalClasses = bookings.length;
-const totalClients = bookings.reduce((sum, booking) => sum + (booking.clients || 1), 0);
-const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
-const coachShare = totalRevenue * 0.5;
-
-// Get attendance data (all attendance records for comprehensive calculation)
-const attendanceRecords = await CoachesAttendance.find({
-  coachId
-});
+   // Fetch ALL coach earnings data (no date restrictions)
+    const coachIdString = coachId.toString();
+    const bookings = await Booking.find({
+      coachId: coachIdString,
+      status: 'completed'
+    });
+    
+    const totalClasses = bookings.length;
+    const totalClients = bookings.reduce((sum, booking) => sum + (booking.clients || 1), 0);
+    const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
+    const coachShare = totalRevenue * 0.5;
+    
+    // Get ALL attendance data (no date restrictions)
+    const attendanceRecords = await CoachesAttendance.find({
+      coachId
+    });
     
     const totalDaysPresent = attendanceRecords.filter(record => record.status === 'present').length;
     const totalDaysAbsent = attendanceRecords.filter(record => record.status === 'absent').length;
@@ -1510,7 +1509,17 @@ const attendanceRecords = await CoachesAttendance.find({
     });
 
     await payroll.save();
+// Clear coach earnings data after successful payroll processing
+    // This removes all completed bookings so earnings reset after payment
+    await Booking.deleteMany({
+      coachId: coachIdString,
+      status: 'completed'
+    });
 
+    // Clear attendance records after payroll processing
+    await CoachesAttendance.deleteMany({
+      coachId
+    });
     // Update coach's lastPaidDate
     await Coach.findByIdAndUpdate(coachId, {
       lastPaidDate: new Date(paymentDate)
