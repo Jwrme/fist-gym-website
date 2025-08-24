@@ -1454,7 +1454,7 @@ app.delete('/api/coaches/:id', async (req, res) => {
 // Payroll endpoints
 app.post('/api/payroll', async (req, res) => {
   try {
-    const { coachId, amount, paymentDate, status } = req.body;
+    const { coachId, amount, paymentDate, status, payrollMonth, payrollYear } = req.body;
     
     // Validate required fields
     if (!coachId || !amount || !paymentDate) {
@@ -1468,12 +1468,12 @@ app.post('/api/payroll', async (req, res) => {
     }
 
     
-    // Fetch coach earnings data
+     // Get ALL completed bookings for this coach (no date restrictions)
+    // This allows for flexible payroll processing at any time
     const coachIdString = coachId.toString();
     const bookings = await Booking.find({
       coachId: coachIdString,
-      status: 'completed',
-      date: { $gte: startOfMonth, $lte: endOfMonth }
+      status: 'completed'
     });
     
     const totalClasses = bookings.length;
@@ -1481,17 +1481,16 @@ app.post('/api/payroll', async (req, res) => {
     const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
     const coachShare = totalRevenue * 0.5;
     
-    // Get attendance data
+    // Get ALL attendance data for this coach (no date restrictions)
     const attendanceRecords = await CoachesAttendance.find({
-      coachId,
-      date: { $gte: startOfMonth, $lte: endOfMonth }
+      coachId
     });
     
     const totalDaysPresent = attendanceRecords.filter(record => record.status === 'present').length;
     const totalDaysAbsent = attendanceRecords.filter(record => record.status === 'absent').length;
     const totalDaysMarked = attendanceRecords.length;
 
-    // Create comprehensive payroll record
+    // Create comprehensive payroll record with period information
     const payroll = new Payroll({
       coachId,
       amount,
@@ -1506,6 +1505,10 @@ app.post('/api/payroll', async (req, res) => {
         totalDaysAbsent,
         totalDaysMarked
       },
+      payrollPeriod: {
+        paymentDate: new Date(paymentDate),
+        processedAt: new Date()
+      },
       processedBy: 'admin'
     });
 
@@ -1516,7 +1519,22 @@ app.post('/api/payroll', async (req, res) => {
     });
 
     console.log('✅ Comprehensive payroll record saved:', payroll._id);
+    console.log('💰 Payment processed:', {
+      coach: `${coach.firstname} ${coach.lastname}`,
+      amount: amount,
+      totalClasses: totalClasses,
+      totalRevenue: totalRevenue,
+      coachShare: coachShare
+    });
     
+    // After successful payment, clear the coach's completed bookings
+    // This allows fresh data to accumulate for future payments
+    await Booking.deleteMany({
+      coachId: coachIdString,
+      status: 'completed'
+    });
+    
+    console.log('🗑️ Cleared completed bookings for coach after payment processing');
     // Send notification to coach
     try {
       const paidThrough = new Date(paymentDate);
@@ -1539,15 +1557,25 @@ app.post('/api/payroll', async (req, res) => {
       console.error('❌ Error sending notification to coach:', notificationError);
     }
 
-    // Return success response
+    // Return success response with detailed payroll data
     return res.status(201).json({
       message: 'Payment processed successfully',
-      payroll,
-      notificationSent: true
+     payroll: {
+        ...payroll.toObject(),
+        coachName: `${coach.firstname} ${coach.lastname}`,
+        payrollPeriodDisplay: `Payment processed on ${new Date(paymentDate).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}`
+      },
+      notificationSent: true,
+      bookingsCleared: true
     });
   } catch (error) {
-    console.error('Error processing payment:', error);
-    res.status(500).json({ error: 'Failed to process payment' });
+    console.error('❌ Error processing payment:', error);
+    console.error('Error details:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to process payment', 
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
