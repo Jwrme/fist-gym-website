@@ -1009,7 +1009,8 @@ const Payroll = () => {
         setPaymentStatus('completed');
         setSelectedCoach(null);
         
-        // Reset the processed coach's earnings to zero in the table
+        // Reset the processed coach's earnings to zero after payment
+        // New bookings will repopulate the data when verified
         setEarnings(prevEarnings => 
           prevEarnings.map(earning => 
             earning.coach._id === selectedCoach._id
