@@ -1469,11 +1469,12 @@ app.post('/api/payroll', async (req, res) => {
 
     
     // Fetch coach earnings data
-   // Fetch ALL coach earnings data (no date restrictions)
+ // Fetch unpaid coach earnings data (no date restrictions)
     const coachIdString = coachId.toString();
     const bookings = await Booking.find({
       coachId: coachIdString,
-      status: 'completed'
+      status: 'completed',
+      payrollStatus: { $ne: 'paid' } // Only get bookings that haven't been paid yet
     });
     
     const totalClasses = bookings.length;
@@ -1481,9 +1482,10 @@ app.post('/api/payroll', async (req, res) => {
     const totalRevenue = bookings.reduce((sum, booking) => sum + (booking.price || 0), 0);
     const coachShare = totalRevenue * 0.5;
     
-    // Get ALL attendance data (no date restrictions)
+    // Get unpaid attendance data (no date restrictions)
     const attendanceRecords = await CoachesAttendance.find({
-      coachId
+      coachId,
+      payrollStatus: { $ne: 'paid' } // Only get attendance that hasn't been paid yet
     });
     
     const totalDaysPresent = attendanceRecords.filter(record => record.status === 'present').length;
@@ -1509,16 +1511,20 @@ app.post('/api/payroll', async (req, res) => {
     });
 
     await payroll.save();
-// Clear coach earnings data after successful payroll processing
-    // This removes all completed bookings so earnings reset after payment
-    await Booking.deleteMany({
+// Mark completed bookings as "paid" instead of deleting them
+    // This way new bookings can still accumulate for next payroll
+    await Booking.updateMany({
       coachId: coachIdString,
       status: 'completed'
+    }, {
+      $set: { payrollStatus: 'paid', paidDate: new Date(paymentDate) }
     });
 
-    // Clear attendance records after payroll processing
-    await CoachesAttendance.deleteMany({
+    // Mark attendance records as "paid" instead of deleting them
+    await CoachesAttendance.updateMany({
       coachId
+    }, {
+      $set: { payrollStatus: 'paid', paidDate: new Date(paymentDate) }
     });
     // Update coach's lastPaidDate
     await Coach.findByIdAndUpdate(coachId, {
