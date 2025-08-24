@@ -87,7 +87,7 @@ const Payroll = () => {
       setLoadingEarnings(true);
       Promise.all(
         coaches.map(coach =>
-          fetch(`http://localhost:3001/api/payroll/data/${coach._id}?start=2024-01-01&end=2099-12-31`)
+          fetch(`https://fist-gym-website.onrender.com/api/payroll/data/${coach._id}?start=2024-01-01&end=2099-12-31`)
             .then(res => res.json())
             .then(data => ({ coach, ...data }))
         )
@@ -105,7 +105,7 @@ const Payroll = () => {
 
   const fetchCoaches = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/coaches');
+      const response = await fetch('https://fist-gym-website.onrender.com/api/coaches');
       if (!response.ok) throw new Error('Failed to fetch coaches');
       const data = await response.json();
       setCoaches(data);
@@ -116,7 +116,7 @@ const Payroll = () => {
 
   const fetchPayrollHistory = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/payroll/history');
+     const response = await fetch('https://fist-gym-website.onrender.com/api/coaches');
       if (!response.ok) throw new Error('Failed to fetch payroll history');
       const data = await response.json();
       setPayrollHistory(data);
@@ -184,7 +184,7 @@ const Payroll = () => {
       let membershipError = false;
       
       try {
-        const membershipResponse = await fetch('http://localhost:3001/api/membership-applications');
+        const membershipResponse = await fetch('https://fist-gym-website.onrender.com/api/membership-applications');
         if (membershipResponse.ok) {
           const membershipData = await membershipResponse.json();
           if (membershipData.success && membershipData.applications) {
@@ -926,7 +926,7 @@ const Payroll = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:3001/api/payroll', {
+     const response = await fetch('https://fist-gym-website.onrender.com/api/payroll', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -955,7 +955,7 @@ const Payroll = () => {
             console.log('🔍 Fetching attendance history for coach:', selectedCoach._id);
             
             // Use the exact same API that powers the attendance history modal
-            const attendanceResponse = await fetch(`http://localhost:3001/api/coaches-attendance/${selectedCoach._id}`);
+          const attendanceResponse = await fetch(`https://fist-gym-website.onrender.com/api/coaches-attendance/${selectedCoach._id}`);
             const attendanceHistory = await attendanceResponse.json();
             
             console.log('📅 Attendance history received:', attendanceHistory);
